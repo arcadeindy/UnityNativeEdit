@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 
+import android.os.Build;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -17,9 +18,14 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
@@ -28,6 +34,8 @@ public class EditBox {
     private final RelativeLayout layout;
     private int tag;
     private int characterLimit;
+    private int lastHeight;
+    private ViewTreeObserver.OnGlobalLayoutListener listener;
 
     private static SparseArray<EditBox> mapEditBox = null;
     private static final String MSG_CREATE = "CreateEdit";
@@ -40,6 +48,7 @@ public class EditBox {
     private static final String MSG_TEXT_END_EDIT = "TextEndEdit";
     private static final String MSG_ANDROID_KEY_DOWN = "AndroidKeyDown";
     private static final String MSG_RETURN_PRESSED = "ReturnPressed";
+    private static final String MSG_CHANGE_HEIGHT = "ChangeHeight";
 
     public static void processRecvJsonMsg(int nSenderId, final String strJson)
     {
@@ -78,20 +87,50 @@ public class EditBox {
     {
         layout = mainLayout;
         edit = null;
+        lastHeight = 0;
+        listener = new ViewTreeObserver.OnGlobalLayoutListener() {
+            public void onGlobalLayout(){
+                Rect r = new Rect();
+                View rootView = NativeEditPlugin.unityActivity.getWindow().getDecorView();
+                rootView.getWindowVisibleDisplayFrame(r);
+
+                int old = lastHeight;
+                lastHeight = rootView.getHeight() - r.bottom;
+                if(old == lastHeight)return;
+
+                JSONObject msgLayoutJSON = new JSONObject();
+                try
+                {
+                    msgLayoutJSON.put("msg", MSG_CHANGE_HEIGHT);
+                    msgLayoutJSON.put("height", lastHeight);
+                }
+                catch(JSONException e) {}
+                SendJsonToUnity(msgLayoutJSON);
+            }
+        };
     }
 
     private void showKeyboard(boolean isShow)
     {
         InputMethodManager imm = (InputMethodManager) NativeEditPlugin.unityActivity.getSystemService(Activity.INPUT_METHOD_SERVICE);
 
-        View rootView = NativeEditPlugin.unityActivity.getWindow().getDecorView();
+        Window window = NativeEditPlugin.unityActivity.getWindow();
+        View rootView = window.getDecorView();
+
+        window.setSoftInputMode( WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         if (isShow)
         {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
             imm.showSoftInput(edit, InputMethodManager.SHOW_FORCED);
         }
         else
         {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+
             rootView.clearFocus();
             imm.hideSoftInputFromWindow(edit.getWindowToken(), 0);
         }
@@ -219,7 +258,6 @@ public class EditBox {
                         default :  editInputType = InputType.TYPE_CLASS_TEXT;
                     }
 
-                    if (multiline) editInputType  |=  InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
 
                     switch (inputType) {
                         case "AutoCorrect" : editInputType |=  InputType.TYPE_TEXT_FLAG_AUTO_CORRECT; break;
@@ -230,6 +268,7 @@ public class EditBox {
                 default : editInputType |= InputType.TYPE_CLASS_TEXT; break; // No action
 
             }
+            if (multiline) editInputType  |=  InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
 
             edit.setInputType(editInputType);
 
@@ -286,6 +325,9 @@ public class EditBox {
             }
 
             final EditBox eb = this;
+
+            View rootView = NativeEditPlugin.unityActivity.getWindow().getDecorView();
+            rootView.getViewTreeObserver().addOnGlobalLayoutListener(listener);
 
             edit.setOnFocusChangeListener(new View.OnFocusChangeListener() {
                 @Override
@@ -372,6 +414,9 @@ public class EditBox {
     private void Remove()
     {
         if (edit != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN)
+                NativeEditPlugin.unityActivity.getWindow().getDecorView().getViewTreeObserver().removeOnGlobalLayoutListener(listener);
+
             layout.removeView(edit);
         }
         edit = null;

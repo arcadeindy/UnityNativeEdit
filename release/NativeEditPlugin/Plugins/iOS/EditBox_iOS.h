@@ -15,6 +15,7 @@
 #define MSG_TEXT_CHANGE @"TextChange"
 #define MSG_TEXT_END_EDIT @"TextEndEdit"
 #define MSG_RETURN_PRESSED @"ReturnPressed"
+#define MSG_CHANGE_HEIGHT @"ChangeHeight"
 
 @interface EditBoxHoldView : UIView
 {

@@ -36,6 +36,7 @@ using UnityEngine.Events;
 using System;
 using System.Collections;
 using UnityEngine.UI;
+using UnityEngine.Serialization;
 
 [RequireComponent(typeof(InputField))]
 public class NativeEditBox : PluginMsgReceiver
@@ -60,11 +61,28 @@ public class NativeEditBox : PluginMsgReceiver
 		Next,
 		Done
 	}
+
+	public float height{ get { return m_height; }}
+	float m_height = 0;
+	float m_LastHeight = 0;
 		
 	public bool	withDoneButton = true;
 	public ReturnKeyType returnKeyType;
 
-	public event Action returnPressed;
+	public RectTransform	keyboardAnchor{ get { return m_KeyboardAnchor; } set { m_KeyboardAnchor = value; } }
+
+	[SerializeField]
+	private RectTransform m_KeyboardAnchor;
+	private RectTransform m_AnchorCanvas;
+
+
+	public Camera	renderCamera{ get { return m_RenderCamera; } set { m_RenderCamera = value; } }
+
+	[SerializeField]
+	private Camera m_RenderCamera;
+
+	public bool	isFocus{ get; protected set; }
+
 
 	public bool updateRectEveryFrame;
 	public bool useInputFieldFont;
@@ -88,6 +106,8 @@ public class NativeEditBox : PluginMsgReceiver
 	private const string MSG_ANDROID_KEY_DOWN = "AndroidKeyDown";
 	private const string MSG_RETURN_PRESSED = "ReturnPressed";
 	private const string MSG_GET_TEXT = "GetText";
+	private const string MSG_CHANGE_HEIGHT = "ChangeHeight";
+	private const float HIDE_POSITION = 20000;
 
 	public InputField InputField { get { return objUnityInput; } }
 
@@ -101,7 +121,7 @@ public class NativeEditBox : PluginMsgReceiver
 		}
 	}
 
-	public static Rect GetScreenRectFromRectTransform(RectTransform rectTransform)
+	public static Rect GetScreenRectFromRectTransform(RectTransform rectTransform, Camera camera = null)
 	{
 		Vector3[] corners = new Vector3[4];
 		
@@ -116,7 +136,7 @@ public class NativeEditBox : PluginMsgReceiver
 		{
 			// For Canvas mode Screen Space - Overlay there is no Camera; best solution I've found
 			// is to use RectTransformUtility.WorldToScreenPoint) with a null camera.
-			Vector3 screenCoord = RectTransformUtility.WorldToScreenPoint(null, corners[i]);
+			Vector3 screenCoord = RectTransformUtility.WorldToScreenPoint(camera, corners[i]);
 			
 			if (screenCoord.x < xMin)
 				xMin = screenCoord.x;
@@ -143,6 +163,12 @@ public class NativeEditBox : PluginMsgReceiver
 		}
 
 		objUnityText = objUnityInput.textComponent;
+
+		if(keyboardAnchor)
+		{
+			m_AnchorCanvas = keyboardAnchor.GetComponentInParent<Canvas> ().rootCanvas.transform as RectTransform;
+		}
+		ChangeHeight (HIDE_POSITION);
 	}
 
 	// Use this for initialization
@@ -221,7 +247,7 @@ public class NativeEditBox : PluginMsgReceiver
 		mConfig.placeHolderColor = placeHolder.color;
 		mConfig.characterLimit = objUnityInput.characterLimit;
 
-		Rect rectScreen = GetScreenRectFromRectTransform(this.objUnityText.rectTransform);
+		Rect rectScreen = GetScreenRectFromRectTransform(this.objUnityText.rectTransform, renderCamera);
 		float fHeightRatio = rectScreen.height / objUnityText.rectTransform.rect.height;
 		mConfig.fontSize = ((float)objUnityText.fontSize) * fHeightRatio;
 
@@ -230,25 +256,6 @@ public class NativeEditBox : PluginMsgReceiver
 		mConfig.contentType = objUnityInput.contentType.ToString();
 		mConfig.backColor = new Color(1.0f, 1.0f, 1.0f, 0.0f);
 		mConfig.multiline = (objUnityInput.lineType == InputField.LineType.SingleLine) ? false : true;
-	}
-
-	private void onTextChange(string newText)
-	{		
-		// Avoid firing a delayed onValueChanged event if the text was changed from Unity with the text property in this
-		// class.
-		if (newText == this.objUnityInput.text)
-			return;
-		
-		this.objUnityInput.text = newText;
-		if (this.objUnityInput.onValueChanged != null)
-			this.objUnityInput.onValueChanged.Invoke(newText);
-	}
-
-	private void onTextEditEnd(string newText)
-	{
-		this.objUnityInput.text = newText;
-		if (this.objUnityInput.onEndEdit != null)
-			this.objUnityInput.onEndEdit.Invoke(newText);
 	}
 
 	public override void OnPluginMsgDirect(JsonObject jsonMsg)
@@ -261,24 +268,28 @@ public class NativeEditBox : PluginMsgReceiver
 		// this is to avoid a deadlock for more info when trying to get data from two separate native plugins and handling them in Unity
 		yield return null;
 
+
 		string msg = jsonMsg.GetString("msg");
 		if (msg.Equals(MSG_TEXT_CHANGE))
 		{
-			string text = jsonMsg.GetString("text");
-			this.onTextChange(text);
+			if (isFocus)
+				this.objUnityInput.text = jsonMsg.GetString("text");
 		}
 		else if (msg.Equals(MSG_TEXT_END_EDIT))
 		{
-			string text = jsonMsg.GetString("text");
-			this.onTextEditEnd(text);
+//			SetFocus (false);
 		}
 		else if (msg.Equals(MSG_RETURN_PRESSED))
 		{
-			if (returnPressed != null)
-				returnPressed();
 			if (OnReturnPressed != null)
 				OnReturnPressed.Invoke();
 		}
+		else if (msg.Equals(MSG_CHANGE_HEIGHT))
+		{
+			ChangeHeight (jsonMsg.GetInt ("height"));
+		}
+
+
 	}
 
 	private bool CheckErrorJsonRet(JsonObject jsonRet)
@@ -294,7 +305,7 @@ public class NativeEditBox : PluginMsgReceiver
 
 	private void CreateNativeEdit()
 	{
-		Rect rectScreen = GetScreenRectFromRectTransform(this.objUnityText.rectTransform);
+		Rect rectScreen = GetScreenRectFromRectTransform(this.objUnityText.rectTransform, renderCamera);
 
 		JsonObject jsonMsg = new JsonObject();
 
@@ -368,7 +379,7 @@ public class NativeEditBox : PluginMsgReceiver
 
 	public void SetRectNative(RectTransform rectTrans)
 	{
-		Rect rectScreen = GetScreenRectFromRectTransform(rectTrans);
+		Rect rectScreen = GetScreenRectFromRectTransform(rectTrans, renderCamera);
 
 		JsonObject jsonMsg = new JsonObject();
 		
@@ -384,6 +395,8 @@ public class NativeEditBox : PluginMsgReceiver
 
 	public void SetFocus(bool bFocus)
 	{
+		bool oldFocus = isFocus;
+		isFocus = bFocus;
 #if (UNITY_IOS || UNITY_ANDROID) && !UNITY_EDITOR
 		if (!bNativeEditCreated)
 		{
@@ -391,19 +404,41 @@ public class NativeEditBox : PluginMsgReceiver
 			return;
 		}
 
+		if(bFocus)
+			TouchScreenKeyboard.hideInput = true;
+
 		JsonObject jsonMsg = new JsonObject();
 		
 		jsonMsg["msg"] = MSG_SET_FOCUS;
 		jsonMsg["isFocus"] = bFocus;
 		
 		this.SendPluginMsg(jsonMsg);
+
+		// Hide trigger.
+		if (oldFocus && !isFocus)
+		{
+			if(objUnityInput.onEndEdit != null)
+				objUnityInput.onEndEdit.Invoke (objUnityInput.text);
+
+			ChangeHeight(HIDE_POSITION, true);
+
+			#if UNITY_ANDROID && !UNITY_EDITOR
+			TouchScreenKeyboard.Open ("", TouchScreenKeyboardType.Default).active = false;
+			#endif
+		}
 #else
 		if (gameObject.activeInHierarchy)
 		{
 			if (bFocus)
+			{
 				objUnityInput.ActivateInputField();
+				ChangeHeight(0);
+			}
 			else
+			{
 				objUnityInput.DeactivateInputField();
+				ChangeHeight(HIDE_POSITION);
+			}
 		}
 		else
 			focusOnCreate = bFocus;
@@ -418,6 +453,38 @@ public class NativeEditBox : PluginMsgReceiver
 		jsonMsg["isVisible"] = bVisible;
 		
 		this.SendPluginMsg(jsonMsg);
+	}
+
+	private void ChangeHeight(float keyboardHeight, bool isForce = false)
+	{
+		m_height = keyboardHeight;
+		if (isForce || m_LastHeight != m_height) {
+
+			if (keyboardAnchor && m_AnchorCanvas) {
+
+				#if (UNITY_ANDROID || UNITY_IOS ) && !UNITY_EDITOR
+				if (keyboardHeight < 1 || !isFocus)
+				{
+					keyboardHeight = HIDE_POSITION;
+					if(isFocus)
+						SetFocus(false);
+				}
+				#endif
+
+				Vector2 ap = keyboardAnchor.anchoredPosition;
+				float currentY = ap.y;
+				ap.y = keyboardHeight * m_AnchorCanvas.rect.height / Screen.height;
+
+				if (1 < Mathf.Abs (currentY - ap.y)) {
+					keyboardAnchor.anchoredPosition = ap;
+					LayoutRebuilder.ForceRebuildLayoutImmediate (keyboardAnchor);
+					LayoutRebuilder.ForceRebuildLayoutImmediate (objUnityText.transform as RectTransform);
+
+					SetRectNative (objUnityText.transform as RectTransform);
+				}
+			}
+		}
+		m_LastHeight = m_height;
 	}
 
 	#if UNITY_ANDROID && !UNITY_EDITOR

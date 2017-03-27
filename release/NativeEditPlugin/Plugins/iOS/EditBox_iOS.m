@@ -159,7 +159,7 @@ bool approxEqualFloat(float x, float y)
     if(self = [super init]) {
         viewController = theViewController;
         tag = _tag;
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardDidShow:) name:UIKeyboardDidShowNotification object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
     }
     return self;
@@ -393,6 +393,8 @@ bool approxEqualFloat(float x, float y)
             textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
         
         [textField addTarget:self action:@selector(textFieldDidChange:) forControlEvents:UIControlEventEditingChanged];
+        [textField addTarget:self action:@selector(textFieldDidEndEditing:) forControlEvents:UIControlEventEditingDidEnd];
+
         [textField setSecureTextEntry:password];
         if (keyboardDoneButtonView != nil) textField.inputAccessoryView = keyboardDoneButtonView;
         
@@ -533,26 +535,33 @@ bool approxEqualFloat(float x, float y)
     [self onTextChange:theTextField.text];
 }
 
--(void) keyboardWillShow:(NSNotification *)notification
+-(void) textFieldDidEndEditing :(UITextField *)theTextField{
+    [self onTextEditEnd:theTextField.text];
+}
+
+-(void) keyboardDidShow:(NSNotification *)notification
 {
     if (![editView isFirstResponder]) return;
     
     NSDictionary* keyboardInfo = [notification userInfo];
-    NSValue* keyboardFrameBegin = [keyboardInfo valueForKey:UIKeyboardFrameBeginUserInfoKey];
+    NSValue* keyboardFrameBegin = [keyboardInfo valueForKey:UIKeyboardFrameEndUserInfoKey];
     rectKeyboardFrame = [keyboardFrameBegin CGRectValue];
+    
+    CGFloat scale = [UIScreen mainScreen].scale;
+    CGFloat height = scale * rectKeyboardFrame.size.height;
 
+    JsonObject* jsonToUnity = [[JsonObject alloc] init];
+    [jsonToUnity setString:@"msg" value:MSG_CHANGE_HEIGHT];
+    [jsonToUnity setFloat:@"height" value:height];
+    [self sendJsonToUnity:jsonToUnity];
 }
 
 -(void) keyboardWillHide:(NSNotification*)notification
 {
-    if (![editView isFirstResponder]) return;
-
-}
-
--(float) getKeyboardheight
-{
-    float height = rectKeyboardFrame.size.height / viewController.view.bounds.size.height;
-    return height;
+    JsonObject* jsonToUnity = [[JsonObject alloc] init];
+    [jsonToUnity setString:@"msg" value:MSG_CHANGE_HEIGHT];
+    [jsonToUnity setFloat:@"height" value:0.0];
+    [self sendJsonToUnity:jsonToUnity];
 }
 
 
