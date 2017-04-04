@@ -479,6 +479,7 @@ public class NativeEditBox : PluginMsgReceiver
 					keyboardAnchor.anchoredPosition = ap;
 					LayoutRebuilder.ForceRebuildLayoutImmediate (keyboardAnchor);
 					LayoutRebuilder.ForceRebuildLayoutImmediate (objUnityText.transform as RectTransform);
+					Canvas.ForceUpdateCanvases ();
 
 					SetRectNative (objUnityText.transform as RectTransform);
 				}
